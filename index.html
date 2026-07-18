@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Duty Dashboard</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        
+        /* --- LAYOUT --- */
+        .main-content { flex: 1; padding: 0; overflow-y: auto; height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; }
+        
+        /* --- NAV & BUTTONS --- */
+        .top-nav { background: white; padding: 8px 16px; border-bottom: 1px solid #cbd5e1; box-shadow: 0 2px 4px rgba(0,0,0,0.04); display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; width: 100%; box-sizing: border-box; flex-wrap: wrap; gap: 8px; }
+        
+        .vibe-btn { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: all 0.2s; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px; }
+        .vibe-btn:hover { background: #e2e8f0; color: #1e293b; }
+        
+        .btn-primary { background: #6b46c1; color: white; border: none; }
+        .btn-primary:hover { background: #5835a5; color: white; }
+
+        /* --- CARDS --- */
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; padding: 12px 16px; align-items: start; }
+        .card { background: white; padding: 10px 12px; border-radius: 8px; border-top: 4px solid #3b82f6; box-shadow: 0 2px 6px rgba(0,0,0,0.06); position: relative; display: flex; flex-direction: column; gap: 6px; }
+        
+        .card-header { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+        .card-remove { background: none; border: none; color: #ef4444; cursor: pointer; font-size: 1rem; padding: 0; flex-shrink: 0; line-height: 1; }
+
+        .section-title-input { font-weight: 800; font-size: 0.85rem; border: 1px solid transparent; border-radius: 4px; padding: 4px 6px; outline: none; text-align: center; color: #1e293b; width: 100%; box-sizing: border-box; transition: background 0.2s; }
+        .section-title-input:focus { background: #f1f5f9; border-color: #cbd5e1; }
+        
+        .section-notes-textarea { font-weight: 500; font-size: 0.75rem; border: 1px solid transparent; border-radius: 4px; padding: 4px 6px; outline: none; text-align: center; color: #64748b; width: 100%; box-sizing: border-box; resize: none; overflow: hidden; min-height: 28px; transition: background 0.2s; }
+        .section-notes-textarea:focus { background: #f1f5f9; border-color: #cbd5e1; }
+
+        .staff-area { background: #0f172a; padding: 8px 10px; border-radius: 6px; min-height: 32px; display: flex; flex-wrap: wrap; gap: 3px; align-content: flex-start; align-items: flex-start; }
+        .staff-list { display: flex; flex-wrap: wrap; gap: 3px; width: 100%; }
+        .staff-tag { background: #3b82f6; color: white; padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 700; line-height: 1.3; display: inline-flex; flex-direction: column; align-items: center; }
+        .staff-due { font-size: 0.58rem; color: #fef08a; font-weight: 600; margin-top: 1px; }
+        .staff-empty { color: #64748b; font-size: 0.72rem; font-style: italic; }
+        
+        .stamp-complete { color: #22c55e; font-weight: 900; font-size: 0.9rem; letter-spacing: 1px; border: 2px solid #22c55e; padding: 4px 12px; border-radius: 6px; transform: rotate(-3deg); opacity: 0.85; user-select: none; margin: 0 auto; }
+
+        .card-assign-btn { width: 100%; justify-content: center; padding: 5px 8px; font-size: 0.72rem; background: #f8fafc; }
+
+        /* --- MODALS --- */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.8); z-index: 2000; justify-content: center; align-items: center; backdrop-filter: blur(4px); }
+        
+        .modal-content { background: white; padding: 30px; border-radius: 20px; width: fit-content; min-width: min(500px, 90vw); max-width: 95vw; max-height: 85vh; display: flex; flex-direction: column; box-sizing: border-box; }
+        
+        #modalEmpList { display: grid; gap: 10px; overflow-y: auto; flex-grow: 1; padding-right: 5px; margin-bottom: 15px; }
+        #selectionGrid { display: grid; gap: 8px; overflow-y: auto; flex-grow: 1; margin-bottom: 20px; }
+        
+        .staff-select-btn { padding: 8px 5px; border-radius: 8px; border: 1px solid #e2e8f0; font-weight: bold; cursor: pointer; text-align: center; background: #fff; transition: background 0.1s; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 45px; }
+        .staff-selected { background: #6b46c1 !important; color: white !important; border-color: #5835a5; }
+        .due-date-input { width: 90%; padding: 3px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.4); background: rgba(0,0,0,0.2); color: white; font-size: 0.75rem; outline: none; text-align: center; font-family: inherit; }
+        .due-date-input::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }
+
+        .dir-paste-area { width: 100%; min-height: 100px; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; font-family: monospace; font-size: 0.8rem; resize: vertical; outline: none; box-sizing: border-box; margin-bottom: 10px; }
+        .dir-entry { background: #f1f5f9; padding: 8px 10px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.85rem; }
+        .dir-entry-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .dir-entry-ini { font-weight: 800; color: #1e40af; letter-spacing: 0.03em; }
+        .dir-entry-name { color: #475569; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #modalEmpList { grid-template-columns: 1fr; max-height: 40vh; }
+
+    </style>
+</head>
+<body>
+
+    <div class="main-content">
+        <div class="top-nav">
+            <div style="display:flex; gap:10px;">
+                <button class="vibe-btn btn-primary" onclick="addSection()">+ New Section</button>
+                <button class="vibe-btn" onclick="toggleModal('empModal', true)">Manage Directory</button>
+                <button class="vibe-btn" style="background: #e0f2fe; color: #1e40af; border-color: #bae6fd;" onclick="autoCompareSchedule()">🖨️ Paste & Print Roster</button>
+            </div>
+        </div>
+        <div id="container" class="grid"></div>
+    </div>
+
+    <div id="empModal" class="modal-overlay" onclick="toggleModal('empModal', false)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <h3 style="margin:0 0 12px 0;">Staff Directory</h3>
+            <p style="margin:0 0 10px 0; color:#64748b; font-size:0.8rem;">Paste lines with last name, first name, 2-letter initials, then dates (dates are ignored).</p>
+            <textarea id="empPasteInput" class="dir-paste-area" placeholder="Example:&#10;Smith, John JD 01/15/2026 06/30/2026&#10;Doe Jane MJ 2/1/26 5/1/26"></textarea>
+            <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+                <button class="vibe-btn" style="background:#e0f2fe; color:#1e40af; border-color:#bae6fd;" onclick="pasteDirectoryClipboard()">Paste from Clipboard</button>
+                <button class="vibe-btn btn-primary" onclick="importDirectoryPaste()">Import Directory</button>
+            </div>
+            <div style="display:flex; gap:10px; margin-bottom:16px;">
+                <input type="text" id="empInitials" placeholder="Quick add initials: AB CD" style="flex-grow:1; padding:10px; border-radius:8px; border:1px solid #e2e8f0; text-transform:uppercase; outline: none; font-size:0.85rem;" onkeydown="if(event.key==='Enter') addEmployee()">
+                <button class="vibe-btn" onclick="addEmployee()">Add</button>
+            </div>
+            <div id="modalEmpList"></div>
+            <button class="vibe-btn" onclick="toggleModal('empModal', false)" style="padding:12px; margin-top:10px; width: 100%; justify-content: center;">Close Directory</button>
+        </div>
+    </div>
+
+    <div id="assignModal" class="modal-overlay">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #f1f5f9; padding-bottom:12px;">
+                <h3 style="margin:0;" id="assignTitle">Assign Staff</h3>
+                <button class="vibe-btn" style="color:#e11d48; border-color:#fecaca;" onclick="clearAllSelection()">Clear All</button>
+            </div>
+            <div style="display:flex; gap:10px; margin-bottom:12px; align-items:flex-start;">
+                <textarea id="quickAssignInput" class="dir-paste-area" style="min-height:64px; flex:1; margin:0;" placeholder="Initials (AB CD), TEAM data ((ABC)), or paste name + date pairs...&#10;Smith, John Michael&#10;03/15/2026" onkeydown="if(event.ctrlKey && event.key==='Enter'){event.preventDefault();quickToggleStaff();}"></textarea>
+                <button class="vibe-btn" style="background:#38a169; color:white; border:none; align-self:stretch;" onclick="quickToggleStaff()">Add / Parse</button>
+            </div>
+            <div id="selectionGrid"></div>
+            <div style="display: flex; gap: 12px; margin-top: 25px;">
+                <button class="vibe-btn" onclick="toggleModal('assignModal', false)" style="flex: 1; justify-content: center;">Cancel</button>
+                <button onclick="finalizeAssignment()" class="vibe-btn btn-primary" style="flex: 2; justify-content: center;">Save Assignments</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "api.php"; 
+
+        // --- CLOUD DATA STATE ---
+        let appData = {
+            sections: [],
+            employees: []
+        };
+        let serverData = {}; 
+        let lastLiveHash = "";
+        let lastEmpHash = "";
+        let saveTimer = null; 
+
+        let currentTargetSection = null;
+        let tempSelected = [];
+        let tempDueDates = {}; 
+
+        // --- UTILITIES ---
+        function formatDateShort(dateString) {
+            if (!dateString) return '';
+            const parts = dateString.split('-');
+            if (parts.length === 3) {
+                return `${parseInt(parts[1])}/${parseInt(parts[2])}`; 
+            }
+            return dateString;
+        }
+
+        function renderStaffTags(sec) {
+            if (!sec.assignedInitials.length) {
+                return '<span class="staff-empty">No staff assigned</span>';
+            }
+            return sec.assignedInitials.map(ini => {
+                const due = sec.dueDates && sec.dueDates[ini] ? formatDateShort(sec.dueDates[ini]) : '';
+                return due
+                    ? `<span class="staff-tag">${ini}<span class="staff-due">${due}</span></span>`
+                    : `<span class="staff-tag">${ini}</span>`;
+            }).join('');
+        }
+
+        function normalizeEmployee(emp) {
+            if (typeof emp === 'string') {
+                return { initials: emp.toUpperCase(), lastName: '', firstName: '' };
+            }
+            return {
+                initials: (emp.initials || '').toUpperCase(),
+                lastName: (emp.lastName || '').trim(),
+                firstName: (emp.firstName || '').trim()
+            };
+        }
+
+        function normalizeEmployeeList(raw) {
+            const seen = new Set();
+            const list = [];
+            (raw || []).forEach(emp => {
+                const e = normalizeEmployee(emp);
+                if (!e.initials || seen.has(e.initials)) return;
+                seen.add(e.initials);
+                list.push(e);
+            });
+            return list.sort((a, b) => a.initials.localeCompare(b.initials));
+        }
+
+        function getEmployeeInitials(emp) {
+            return normalizeEmployee(emp).initials;
+        }
+
+        function hasEmployee(ini) {
+            const key = (ini || '').toUpperCase();
+            return appData.employees.some(e => getEmployeeInitials(e) === key);
+        }
+
+        function formatEmployeeName(emp) {
+            const e = normalizeEmployee(emp);
+            if (e.lastName && e.firstName) return `${e.lastName}, ${e.firstName}`;
+            if (e.lastName) return e.lastName;
+            if (e.firstName) return e.firstName;
+            return '';
+        }
+
+        function parseToIsoDate(dateStr) {
+            if (!dateStr) return null;
+            const cleaned = dateStr.trim();
+            let m = cleaned.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+            if (m) {
+                let year = parseInt(m[3], 10);
+                if (year < 100) year += 2000;
+                return `${year}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+            }
+            m = cleaned.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+            if (m) {
+                return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+            }
+            return null;
+        }
+
+        function firstNamesMatch(pastedFirst, empFirst) {
+            if (!pastedFirst) return !empFirst;
+            if (!empFirst) return false;
+            const pastedLead = pastedFirst.toLowerCase().split(/\s+/)[0];
+            const empLead = empFirst.toLowerCase().split(/\s+/)[0];
+            return pastedLead === empLead;
+        }
+
+        function findEmployeeByName(nameText) {
+            const text = (nameText || '').trim();
+            if (!text) return null;
+
+            const candidates = appData.employees.map(normalizeEmployee);
+            const textLower = text.toLowerCase();
+
+            for (const emp of candidates) {
+                const formatted = formatEmployeeName(emp).toLowerCase();
+                if (formatted && formatted === textLower) return emp;
+            }
+
+            let lastName = '';
+            let firstName = '';
+            if (text.includes(',')) {
+                const parts = text.split(',');
+                lastName = parts[0].trim();
+                firstName = parts.slice(1).join(',').trim();
+            } else {
+                const parts = text.split(/\s+/).filter(Boolean);
+                if (parts.length >= 2) {
+                    lastName = parts[0];
+                    firstName = parts.slice(1).join(' ');
+                } else if (parts.length === 1) {
+                    lastName = parts[0];
+                }
+            }
+
+            const matches = candidates.filter(emp => {
+                if (!emp.lastName) return false;
+                const lastOk = emp.lastName.toLowerCase() === lastName.toLowerCase();
+                if (!lastOk) return false;
+                if (!firstName) return true;
+                if (!emp.firstName) return false;
+                return emp.firstName.toLowerCase() === firstName.toLowerCase()
+                    || firstNamesMatch(firstName, emp.firstName);
+            });
+
+            if (matches.length === 1) return matches[0];
+            if (!firstName && matches.length === 1) return matches[0];
+            return null;
+        }
+
+        function looksLikeNameLine(line) {
+            if (!line || parseToIsoDate(line)) return false;
+            if (/^\d+$/.test(line)) return false;
+            return /[a-zA-Z]/.test(line);
+        }
+
+        function parseAssignPasteText(rawText) {
+            const matched = [];
+            const notFound = [];
+            const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '');
+
+            let i = 0;
+            while (i < lines.length) {
+                if (i + 1 < lines.length) {
+                    const name = lines[i];
+                    const dueDate = parseToIsoDate(lines[i + 1]);
+                    if (dueDate && looksLikeNameLine(name)) {
+                        const emp = findEmployeeByName(name);
+                        if (emp) matched.push({ initials: emp.initials, dueDate, name });
+                        else notFound.push(name);
+                        i += 2;
+                        continue;
+                    }
+                }
+                i++;
+            }
+
+            return { matched, notFound };
+        }
+
+        function stripTrailingDates(line) {
+            let working = line.trim();
+            const datePattern = /\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})\s*$/;
+            for (let i = 0; i < 3; i++) {
+                const next = working.replace(datePattern, '').trim();
+                if (next === working) break;
+                working = next;
+            }
+            return working;
+        }
+
+        function parseDirectoryLine(line) {
+            line = line.trim();
+            if (!line) return null;
+
+            let working = stripTrailingDates(line);
+            if (!working) return null;
+
+            const tabParts = working.split('\t').map(p => p.trim()).filter(Boolean);
+            const parts = tabParts.length > 1 ? tabParts : working.split(/\s+/).filter(Boolean);
+            if (!parts.length) return null;
+
+            let iniIndex = -1;
+            for (let i = parts.length - 1; i >= 0; i--) {
+                if (/^[A-Za-z]{2}$/.test(parts[i])) {
+                    iniIndex = i;
+                    break;
+                }
+            }
+            if (iniIndex === -1) return null;
+
+            const initials = parts[iniIndex].toUpperCase();
+            const nameParts = parts.slice(0, iniIndex).map(p => p.replace(/,$/, '').trim()).filter(Boolean);
+            if (!nameParts.length) return null;
+
+            let lastName = '';
+            let firstName = '';
+
+            if (nameParts.length === 1 && nameParts[0].includes(',')) {
+                const split = nameParts[0].split(',');
+                lastName = split[0].trim();
+                firstName = split.slice(1).join(',').trim();
+            } else if (nameParts.length >= 2) {
+                lastName = nameParts[0];
+                firstName = nameParts.slice(1).join(' ');
+            } else {
+                lastName = nameParts[0];
+            }
+
+            return { initials, lastName, firstName };
+        }
+
+        function parseDirectoryText(rawText) {
+            const parsed = [];
+            const errors = [];
+            rawText.split(/\r?\n/).forEach((line, idx) => {
+                if (!line.trim()) return;
+                const entry = parseDirectoryLine(line);
+                if (entry) parsed.push(entry);
+                else errors.push(idx + 1);
+            });
+            return { parsed, errors };
+        }
+
+        function upsertEmployees(entries) {
+            let added = 0;
+            let updated = 0;
+            entries.forEach(entry => {
+                const idx = appData.employees.findIndex(e => getEmployeeInitials(e) === entry.initials);
+                if (idx !== -1) {
+                    const norm = normalizeEmployee(appData.employees[idx]);
+                    if (entry.lastName) norm.lastName = entry.lastName;
+                    if (entry.firstName) norm.firstName = entry.firstName;
+                    appData.employees[idx] = norm;
+                    updated++;
+                } else {
+                    appData.employees.push({ ...entry });
+                    added++;
+                }
+            });
+            appData.employees = normalizeEmployeeList(appData.employees);
+            return { added, updated };
+        }
+
+        // --- INITIALIZATION & CLOUD SYNC ---
+        function init() {
+            startApp();
+        }
+
+        function startApp() {
+            syncFromCloud();
+            if (!window.syncInterval) {
+                window.syncInterval = setInterval(syncFromCloud, 8000); 
+            }
+        }
+
+        async function syncFromCloud() {
+            if (saveTimer) return; 
+            try {
+                const res = await fetch(API_URL);
+                if (!res.ok) throw new Error("Fetch failed");
+                const data = await res.json();
+                
+                serverData = data; 
+                
+                const newEmpHash = JSON.stringify(data.employees || []);
+                if (newEmpHash !== lastEmpHash) {
+                    appData.employees = normalizeEmployeeList(data.employees || []);
+                    lastEmpHash = newEmpHash;
+                    renderStaffListModal();
+                }
+
+                const newLiveHash = JSON.stringify(data.liveSections);
+                if (newLiveHash !== lastLiveHash) {
+                    appData.sections = data.liveSections || [];
+                    
+                    if (appData.sections.length === 0) {
+                        appData.sections.push({ id: Date.now(), label: "Front Desk", content: "Check radios", assignedInitials: [], dueDates: {} });
+                    }
+                    appData.sections.forEach(s => { if(!s.dueDates) s.dueDates = {}; });
+                    
+                    lastLiveHash = newLiveHash;
+                    render();
+                }
+            } catch (err) {
+                console.error("Sync Error:", err);
+            }
+        }
+
+        function queueSave() {
+            if (saveTimer) clearTimeout(saveTimer);
+            saveTimer = setTimeout(() => {
+                saveToCloud();
+                saveTimer = null;
+            }, 1000);
+        }
+
+        async function saveToCloud() {
+            try {
+                appData.sections.forEach(s => s.synced = true); 
+                
+                const liveCopy = JSON.parse(JSON.stringify(appData.sections));
+                const draftCopy = JSON.parse(JSON.stringify(appData.sections));
+
+                serverData.sections = draftCopy;
+                serverData.liveSections = liveCopy;
+                serverData.employees = appData.employees;
+
+                lastLiveHash = JSON.stringify(liveCopy);
+                lastEmpHash = JSON.stringify(appData.employees);
+
+                await fetch(API_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(serverData)
+                });
+            } catch (err) {
+                console.error("Save Error:", err);
+            }
+        }
+
+        // --- CORE RENDER ---
+        function render() {
+            const container = document.getElementById('container');
+            container.innerHTML = '';
+            
+            appData.sections.forEach((sec, index) => {
+                const isComplete = sec.assignedInitials.length === 0;
+                const card = document.createElement('div');
+                card.className = 'card';
+                
+                const sidStr = sec.id.toString();
+
+                card.innerHTML = `
+                    <div class="card-header">
+                        <input class="section-title-input" value="${sec.label}" placeholder="Section Title" oninput="updateField('${sidStr}', 'label', this.value)">
+                        <button class="card-remove" onclick="deleteSection('${sidStr}')" title="Delete Section">✕</button>
+                    </div>
+                    <textarea class="section-notes-textarea" placeholder="Notes..." oninput="updateField('${sidStr}', 'content', this.value)" rows="1">${sec.content || ''}</textarea>
+                    <div class="staff-area">
+                        ${isComplete
+                            ? `<div class="stamp-complete">COMPLETE</div>`
+                            : `<div class="staff-list">${renderStaffTags(sec)}</div>`
+                        }
+                    </div>
+                    <button class="vibe-btn card-assign-btn" onclick="openAssignModal('${sidStr}')">+ Assign</button>
+                `;
+                container.appendChild(card);
+            });
+            renderStaffListModal();
+        }
+
+        // --- CRUD OPERATIONS ---
+        function addSection() {
+            appData.sections.push({ id: Date.now(), label: "", content: "", assignedInitials: [], dueDates: {} });
+            queueSave(); render();
+        }
+
+        function deleteSection(id) {
+            if (confirm("Are you sure you want to delete this section?")) {
+                appData.sections = appData.sections.filter(s => s.id != id);
+                queueSave(); render();
+            }
+        }
+
+        function updateField(id, field, value) {
+            const sec = appData.sections.find(s => s.id == id);
+            if (sec) sec[field] = value;
+            queueSave(); 
+        }
+
+        // --- SMART ASSIGNMENT MODAL ---
+        function openAssignModal(id) {
+            currentTargetSection = id;
+            const sec = appData.sections.find(s => s.id == id);
+            document.getElementById('assignTitle').innerText = `Assign: ${sec.label || 'Section'}`;
+            
+            tempSelected = sec.assignedInitials.filter(ini => hasEmployee(ini));
+            tempDueDates = sec.dueDates ? { ...sec.dueDates } : {};
+            Object.keys(tempDueDates).forEach(ini => {
+                if (!hasEmployee(ini)) delete tempDueDates[ini];
+            });
+
+            const quickInput = document.getElementById('quickAssignInput');
+            if (quickInput) quickInput.value = '';
+
+            renderSelectionGrid();
+            toggleModal('assignModal', true);
+        }
+
+        function renderSelectionGrid() {
+            const grid = document.getElementById('selectionGrid');
+            const count = appData.employees.length;
+            
+            let cols = Math.max(4, Math.ceil(Math.sqrt(count) * 1.5)); 
+            if (cols > 10) cols = 10; 
+            
+            grid.style.gridTemplateColumns = `repeat(${cols}, minmax(110px, 1fr))`;
+            
+            grid.innerHTML = appData.employees.map(emp => {
+                const ini = getEmployeeInitials(emp);
+                const name = formatEmployeeName(emp);
+                return `
+                <div class="staff-select-btn ${tempSelected.includes(ini) ? 'staff-selected' : ''}" onclick="toggleStaff('${ini}')">
+                    <div style="font-size: 1.1rem;">${ini}</div>
+                    ${name ? `<div style="font-size:0.65rem; font-weight:600; opacity:0.85;">${name}</div>` : ''}
+                    ${tempSelected.includes(ini) ? `<input type="date" class="due-date-input" value="${tempDueDates[ini] || ''}" onclick="event.stopPropagation()" onchange="setTempDate('${ini}', this.value)">` : ''}
+                </div>
+            `}).join('');
+        }
+
+        function toggleStaff(e) {
+            if (tempSelected.includes(e)) {
+                tempSelected = tempSelected.filter(x => x!==e);
+                delete tempDueDates[e];
+            } else {
+                tempSelected.push(e);
+            }
+            renderSelectionGrid();
+        }
+
+        function setTempDate(ini, val) {
+            tempDueDates[ini] = val;
+        }
+
+        function quickToggleStaff() {
+            const input = document.getElementById('quickAssignInput');
+            const rawVal = input.value.trim();
+            
+            if (!rawVal) { input.focus(); return; }
+
+            const { matched, notFound } = parseAssignPasteText(rawVal);
+            if (matched.length > 0) {
+                matched.forEach(({ initials, dueDate }) => {
+                    if (!tempSelected.includes(initials)) tempSelected.push(initials);
+                    tempDueDates[initials] = dueDate;
+                });
+                tempSelected.sort();
+                renderSelectionGrid();
+                input.value = '';
+                if (notFound.length) {
+                    alert(`Added ${matched.length} staff.\n\nNot in directory: ${[...new Set(notFound)].join(', ')}`);
+                }
+                input.focus();
+                return;
+            }
+
+            if (notFound.length > 0) {
+                alert(`Not in directory: ${[...new Set(notFound)].join(', ')}`);
+                input.focus();
+                return;
+            }
+
+            let inisArray = [];
+            
+            if (rawVal.includes('(') && rawVal.includes(')')) {
+                const regex = /\(([a-zA-Z]+)\)/g;
+                let match;
+                while ((match = regex.exec(rawVal)) !== null) {
+                    inisArray.push(match[1].toUpperCase());
+                }
+                if (inisArray.length === 0) {
+                    alert("Could not find valid initials inside parentheses in the pasted text.");
+                    input.focus(); return;
+                }
+            } else {
+                inisArray = rawVal.toUpperCase().split(/\s+/).filter(t => /^[A-Z]{2,3}$/.test(t));
+                if (inisArray.length === 0) {
+                    if (rawVal.includes('\n')) {
+                        alert("Could not parse paste.\n\nFor names + dates use:\nLast, First Middle\n03/15/2026\n\nOr use initials, TEAM data, or (ABC) format.");
+                    } else {
+                        alert("No valid initials found. Use 2–3 letter codes like AB CD.");
+                    }
+                    input.focus();
+                    return;
+                }
+            }
+
+            let added = 0;
+            const missing = [];
+
+            inisArray.forEach(ini => {
+                if (!ini) return;
+                if (!hasEmployee(ini)) {
+                    missing.push(ini);
+                    return;
+                }
+                if (!tempSelected.includes(ini)) {
+                    tempSelected.push(ini);
+                    added++;
+                }
+            });
+
+            if (added === 0 && missing.length === 0) {
+                alert("Those initials are already assigned in this section.");
+            } else if (added === 0 && missing.length > 0) {
+                alert("Not in directory: " + missing.join(', '));
+            } else if (missing.length > 0) {
+                alert(`Added ${added} staff.\n\nNot in directory: ${missing.join(', ')}`);
+            }
+            
+            renderSelectionGrid();
+            input.value = '';
+            input.focus();
+        }
+
+        function clearAllSelection() { 
+            tempSelected = []; 
+            tempDueDates = {};
+            renderSelectionGrid(); 
+        }
+
+        function finalizeAssignment() {
+            const sec = appData.sections.find(s => s.id == currentTargetSection);
+            if (!sec) return;
+            
+            const validSelected = tempSelected.filter(ini => hasEmployee(ini));
+            const finalDueDates = {};
+            validSelected.forEach(ini => {
+                if (tempDueDates[ini]) finalDueDates[ini] = tempDueDates[ini];
+            });
+
+            sec.assignedInitials = validSelected.sort();
+            sec.dueDates = finalDueDates;
+            
+            queueSave();
+            render();
+            toggleModal('assignModal', false);
+        }
+
+        // --- DIRECTORY MANAGEMENT ---
+        function renderStaffListModal() {
+            const list = document.getElementById('modalEmpList');
+            if (!list) return;
+
+            list.innerHTML = appData.employees.map((emp, i) => {
+                const ini = getEmployeeInitials(emp);
+                const name = formatEmployeeName(emp);
+                return `
+                    <div class="dir-entry">
+                        <div class="dir-entry-main">
+                            <span class="dir-entry-ini">${ini}</span>
+                            <span class="dir-entry-name">${name || 'Name not set'}</span>
+                        </div>
+                        <span onclick="removeEmployee(${i})" style="color:#e11d48; cursor:pointer; font-weight:bold; flex-shrink:0;">✕</span>
+                    </div>
+                `;
+            }).join('') || '<div style="color:#94a3b8; font-size:0.85rem; text-align:center; padding:12px;">No staff in directory yet. Paste roster lines above.</div>';
+        }
+
+        async function pasteDirectoryClipboard() {
+            try {
+                const text = await navigator.clipboard.readText();
+                if (!text || !text.trim()) {
+                    alert("Clipboard is empty.");
+                    return;
+                }
+                document.getElementById('empPasteInput').value = text;
+            } catch (err) {
+                alert("Clipboard access denied. Paste into the text box manually.");
+            }
+        }
+
+        function importDirectoryPaste() {
+            const raw = document.getElementById('empPasteInput').value;
+            if (!raw.trim()) {
+                alert("Paste roster lines first.");
+                return;
+            }
+
+            const { parsed, errors } = parseDirectoryText(raw);
+            if (parsed.length === 0) {
+                alert("Could not parse any lines. Expected: Last, First XX followed by dates.\nExample: Smith, John JD 01/15/2026 06/30/2026");
+                return;
+            }
+
+            const { added, updated } = upsertEmployees(parsed);
+            queueSave();
+            renderStaffListModal();
+            document.getElementById('empPasteInput').value = '';
+
+            let msg = `Imported ${parsed.length} staff (${added} new`;
+            if (updated) msg += `, ${updated} updated`;
+            msg += '). Saved to cloud.';
+            if (errors.length) msg += `\n\nSkipped ${errors.length} line(s) that could not be parsed.`;
+            alert(msg);
+        }
+
+        function addEmployee() {
+            const input = document.getElementById('empInitials');
+            const val = input.value.trim().toUpperCase();
+            
+            if (val) {
+                const inisArray = val.split(/\s+/);
+                let added = false;
+
+                inisArray.forEach(ini => {
+                    if (ini && !hasEmployee(ini)) {
+                        appData.employees.push({ initials: ini, lastName: '', firstName: '' });
+                        added = true;
+                    }
+                });
+
+                if (added) {
+                    appData.employees = normalizeEmployeeList(appData.employees);
+                    queueSave();
+                    renderStaffListModal();
+                }
+                input.value = '';
+            }
+        }
+
+        function removeEmployee(i) {
+            appData.employees.splice(i, 1);
+            queueSave();
+            renderStaffListModal();
+        }
+
+        // --- AUTO COMPARE & PRINT ROSTER ---
+        async function autoCompareSchedule() {
+            try {
+                const rawData = await navigator.clipboard.readText();
+                if (!rawData || !rawData.trim()) { alert("Clipboard is empty. Copy the schedule data first."); return; }
+                generatePrintableRoster(rawData);
+            } catch (err) {
+                alert("Clipboard access denied. Allow permissions in your browser.");
+            }
+        }
+
+        function generatePrintableRoster(rawData) {
+            let reportDate = new Date().toLocaleDateString();
+            const dateIdx = rawData.indexOf('===DATE===');
+            const schedIdx = rawData.indexOf('===SCHEDULE_START===');
+            
+            if (dateIdx !== -1 && schedIdx !== -1 && schedIdx > dateIdx) {
+                let rawDateText = rawData.substring(dateIdx + 10, schedIdx).trim();
+                if (rawDateText) reportDate = rawDateText; 
+            }
+
+            let scheduleData = rawData.toUpperCase();
+            const reqStart = scheduleData.indexOf('===REQUESTS_START===');
+            if (reqStart !== -1) scheduleData = scheduleData.substring(0, reqStart);
+            const schedStartUpper = scheduleData.indexOf('===SCHEDULE_START===');
+            if (schedStartUpper !== -1) scheduleData = scheduleData.substring(schedStartUpper + 20);
+
+            let shiftMap = {}; 
+            let currentShiftTime = -1; 
+            const lines = scheduleData.split('\n');
+
+            for (let line of lines) {
+                line = line.trim();
+                if (!line) continue;
+                const timeMatch = line.match(/^(\d{4})/);
+                if (timeMatch) { currentShiftTime = parseInt(timeMatch[1], 10); continue; }
+                if (currentShiftTime >= 0 && currentShiftTime < 2000) {
+                    let shiftType = (currentShiftTime <= 1000) ? 'Day' : 'Eve';
+                    const words = line.split(/[^A-Z]+/);
+                    for (let w of words) { if (w && hasEmployee(w)) shiftMap[w] = shiftType; }
+                }
+            }
+
+            const pastedInitials = Object.keys(shiftMap);
+            if (pastedInitials.length === 0) { alert("Could not find initials for shifts before 2000 matching the Directory."); return; }
+
+            let printHTML = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Duty/Pre-Duty Items</title>
+                <style>
+                    body { font-family: 'Arial', sans-serif; padding: 20px; color: #000; } 
+                    .header-container { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 30px; } 
+                    h1 { font-size: 1.8rem; text-transform: uppercase; margin: 0; } 
+                    .date-stamp { font-weight: bold; color: #333; font-size: 1.1rem; } 
+                    .section-block { margin-bottom: 25px; } 
+                    .section-title { font-size: 1.3rem; font-weight: bold; text-decoration: underline; margin-bottom: 6px; } 
+                    .section-notes { font-size: 1rem; color: #444; font-style: italic; margin-bottom: 6px; white-space: pre-wrap; }
+                    .shift-label { font-size: 1.1rem; font-weight: bold; color: #444; margin-top: 5px; } 
+                    .initials-list { font-weight: normal; color: #000; } 
+                    .no-match { color: #666; font-style: italic; font-size: 1.1rem; }
+                </style>
+            </head>
+            <body>
+                <div class="header-container">
+                    <h1>Duty/Pre-Duty Items</h1>
+                    <div class="date-stamp">${reportDate}</div>
+                </div>`;
+
+            let matchCount = 0;
+            appData.sections.forEach(sec => {
+                const matchedDay = []; const matchedEve = [];
+                
+                sec.assignedInitials.forEach(ini => {
+                    let printIni = ini;
+                    if (sec.dueDates && sec.dueDates[ini]) {
+                        printIni += ` (${formatDateShort(sec.dueDates[ini])})`;
+                    }
+
+                    if (shiftMap[ini] === 'Day') matchedDay.push(printIni);
+                    else if (shiftMap[ini] === 'Eve') matchedEve.push(printIni);
+                });
+                
+                if (matchedDay.length > 0 || matchedEve.length > 0) {
+                    matchCount += (matchedDay.length + matchedEve.length);
+                    printHTML += `<div class="section-block"><div class="section-title">${sec.label || 'Untitled Section'}</div>`;
+                    
+                    if (sec.content && sec.content.trim() !== '') {
+                        printHTML += `<div class="section-notes">${sec.content}</div>`;
+                    }
+
+                    if (matchedDay.length > 0) printHTML += `<div class="shift-label">Day: <span class="initials-list">${matchedDay.join(', ')}</span></div>`;
+                    if (matchedEve.length > 0) printHTML += `<div class="shift-label">Eve: <span class="initials-list">${matchedEve.join(', ')}</span></div>`;
+                    printHTML += `</div>`;
+                }
+            });
+
+            if (matchCount === 0) printHTML += `<div class="no-match">None of the recognized clipboard initials are assigned to sections.</div>`;
+            printHTML += `<script>window.onload = function() { window.print(); }<\/script></body></html>`;
+
+            const printWindow = window.open('', '_blank');
+            if(printWindow) { printWindow.document.write(printHTML); printWindow.document.close(); } 
+            else { alert("Please allow pop-ups to view the roster."); }
+        }
+
+        // --- UTILS ---
+        function toggleModal(id, show) {
+            const m = document.getElementById(id);
+            if (m) {
+                m.style.display = show ? 'flex' : 'none';
+                if (show) setTimeout(() => { const inp = m.querySelector('input, textarea'); if(inp) inp.focus(); }, 50);
+            }
+        }
+
+        // --- START ---
+        init();
+
+    </script>
+</body>
+</html>
