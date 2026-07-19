@@ -113,16 +113,13 @@
     </div>
 
     <script>
-        const API_URL = "api.php"; 
+        const STORAGE_KEY = 'dutyDashboardData';
 
-        // --- CLOUD DATA STATE ---
+        // --- APP DATA STATE ---
         let appData = {
             sections: [],
             employees: []
         };
-        let serverData = {}; 
-        let lastLiveHash = "";
-        let lastEmpHash = "";
         let saveTimer = null; 
 
         let currentTargetSection = null;
@@ -208,11 +205,50 @@
             return null;
         }
 
+        const NAME_SUFFIXES = new Set(['jr', 'sr', 'ii', 'iii', 'iv']);
+
+        function normalizeNameToken(token) {
+            return (token || '').toLowerCase().replace(/\.$/, '').trim();
+        }
+
+        function isNameSuffix(token) {
+            return NAME_SUFFIXES.has(normalizeNameToken(token));
+        }
+
+        function stripTrailingSuffixes(words) {
+            const copy = [...words];
+            while (copy.length && isNameSuffix(copy[copy.length - 1])) {
+                copy.pop();
+            }
+            return copy;
+        }
+
+        function getLastNameKey(lastName) {
+            const words = (lastName || '').trim().split(/\s+/).filter(Boolean);
+            const stripped = stripTrailingSuffixes(words);
+            return (stripped.join(' ') || (lastName || '')).toLowerCase();
+        }
+
+        function lastNamesMatch(pastedLast, empLast) {
+            if (!pastedLast || !empLast) return false;
+            return getLastNameKey(pastedLast) === getLastNameKey(empLast);
+        }
+
+        function namesCompatibleByPrefix(a, b) {
+            if (!a || !b) return false;
+            if (a === b) return true;
+            const minLen = 3;
+            if (a.length >= minLen && b.startsWith(a)) return true;
+            if (b.length >= minLen && a.startsWith(b)) return true;
+            return false;
+        }
+
         function firstNamesMatch(pastedFirst, empFirst) {
             if (!pastedFirst || !empFirst) return false;
-            const pastedLead = pastedFirst.toLowerCase().replace(/\.$/, '').split(/\s+/)[0];
-            const empLead = empFirst.toLowerCase().split(/\s+/)[0];
-            return pastedLead.length > 1 && pastedLead === empLead;
+            const pastedLead = normalizeNameToken(stripTrailingSuffixes(pastedFirst.split(/\s+/).filter(Boolean))[0]);
+            const empLead = normalizeNameToken(stripTrailingSuffixes(empFirst.split(/\s+/).filter(Boolean))[0]);
+            if (pastedLead.length > 1 && pastedLead === empLead) return true;
+            return namesCompatibleByPrefix(pastedLead, empLead);
         }
 
         function isLikelyMiddleInitial(token) {
@@ -251,7 +287,7 @@
             if (!parsed || !parsed.lastName) return null;
 
             const lastMatches = candidates.filter(emp =>
-                emp.lastName && emp.lastName.toLowerCase() === parsed.lastName.toLowerCase()
+                emp.lastName && lastNamesMatch(parsed.lastName, emp.lastName)
             );
 
             if (lastMatches.length === 0) return null;
@@ -265,9 +301,11 @@
             if (scored.length === 0) return null;
 
             const exact = scored.filter(entry =>
-                entry.hitTokens.some(token =>
-                    token.toLowerCase() === entry.emp.firstName.toLowerCase().split(/\s+/)[0]
-                )
+                entry.hitTokens.some(token => {
+                    const tokenKey = normalizeNameToken(token);
+                    const empLead = normalizeNameToken(stripTrailingSuffixes(entry.emp.firstName.split(/\s+/).filter(Boolean))[0]);
+                    return tokenKey === empLead || namesCompatibleByPrefix(tokenKey, empLead);
+                })
             );
             if (exact.length === 1) return exact[0].emp;
 
@@ -389,78 +427,52 @@
             return { added, updated };
         }
 
-        // --- INITIALIZATION & CLOUD SYNC ---
+        // --- INITIALIZATION & LOCAL STORAGE ---
         function init() {
-            startApp();
+            loadFromStorage();
         }
 
-        function startApp() {
-            syncFromCloud();
-            if (!window.syncInterval) {
-                window.syncInterval = setInterval(syncFromCloud, 8000); 
-            }
-        }
-
-        async function syncFromCloud() {
-            if (saveTimer) return; 
+        function loadFromStorage() {
             try {
-                const res = await fetch(API_URL);
-                if (!res.ok) throw new Error("Fetch failed");
-                const data = await res.json();
-                
-                serverData = data; 
-                
-                const newEmpHash = JSON.stringify(data.employees || []);
-                if (newEmpHash !== lastEmpHash) {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (raw) {
+                    const data = JSON.parse(raw);
                     appData.employees = normalizeEmployeeList(data.employees || []);
-                    lastEmpHash = newEmpHash;
-                    renderStaffListModal();
-                }
-
-                const newLiveHash = JSON.stringify(data.liveSections);
-                if (newLiveHash !== lastLiveHash) {
-                    appData.sections = data.liveSections || [];
-                    
-                    if (appData.sections.length === 0) {
-                        appData.sections.push({ id: Date.now(), label: "Front Desk", content: "Check radios", assignedInitials: [], dueDates: {} });
-                    }
-                    appData.sections.forEach(s => { if(!s.dueDates) s.dueDates = {}; });
-                    
-                    lastLiveHash = newLiveHash;
-                    render();
+                    appData.sections = Array.isArray(data.sections) ? data.sections : [];
                 }
             } catch (err) {
-                console.error("Sync Error:", err);
+                console.error("Load Error:", err);
             }
+
+            if (appData.sections.length === 0) {
+                appData.sections.push({
+                    id: Date.now(),
+                    label: "Front Desk",
+                    content: "Check radios",
+                    assignedInitials: [],
+                    dueDates: {}
+                });
+            }
+            appData.sections.forEach(s => { if (!s.dueDates) s.dueDates = {}; });
+
+            render();
         }
 
         function queueSave() {
             if (saveTimer) clearTimeout(saveTimer);
             saveTimer = setTimeout(() => {
-                saveToCloud();
+                saveToStorage();
                 saveTimer = null;
-            }, 1000);
+            }, 300);
         }
 
-        async function saveToCloud() {
+        function saveToStorage() {
             try {
-                appData.sections.forEach(s => s.synced = true); 
-                
-                const liveCopy = JSON.parse(JSON.stringify(appData.sections));
-                const draftCopy = JSON.parse(JSON.stringify(appData.sections));
-
-                serverData.sections = draftCopy;
-                serverData.liveSections = liveCopy;
-                serverData.employees = appData.employees;
-
-                lastLiveHash = JSON.stringify(liveCopy);
-                lastEmpHash = JSON.stringify(appData.employees);
-
-                await fetch(API_URL, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(serverData)
-                });
+                const payload = {
+                    sections: appData.sections,
+                    employees: appData.employees
+                };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
             } catch (err) {
                 console.error("Save Error:", err);
             }
