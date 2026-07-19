@@ -128,6 +128,7 @@
         let currentTargetSection = null;
         let tempSelected = [];
         let tempDueDates = {}; 
+        let focusSectionId = null;
 
         // --- UTILITIES ---
         function formatDateShort(dateString) {
@@ -208,11 +209,37 @@
         }
 
         function firstNamesMatch(pastedFirst, empFirst) {
-            if (!pastedFirst) return !empFirst;
-            if (!empFirst) return false;
-            const pastedLead = pastedFirst.toLowerCase().split(/\s+/)[0];
+            if (!pastedFirst || !empFirst) return false;
+            const pastedLead = pastedFirst.toLowerCase().replace(/\.$/, '').split(/\s+/)[0];
             const empLead = empFirst.toLowerCase().split(/\s+/)[0];
-            return pastedLead === empLead;
+            return pastedLead.length > 1 && pastedLead === empLead;
+        }
+
+        function isLikelyMiddleInitial(token) {
+            return /^[A-Za-z]\.?$/.test((token || '').trim());
+        }
+
+        function tokenMatchesFirstName(token, empFirst) {
+            if (!token || !empFirst) return false;
+            if (isLikelyMiddleInitial(token)) return false;
+            return firstNamesMatch(token, empFirst);
+        }
+
+        function parseNameParts(nameText) {
+            const text = (nameText || '').trim();
+            if (!text) return null;
+
+            if (text.includes(',')) {
+                const parts = text.split(',');
+                return {
+                    lastName: parts[0].trim(),
+                    tokens: parts.slice(1).join(',').trim().split(/\s+/).filter(Boolean).slice(0, 2)
+                };
+            }
+
+            const parts = text.split(/\s+/).filter(Boolean);
+            if (parts.length < 2) return { lastName: parts[0] || '', tokens: [] };
+            return { lastName: parts[0], tokens: parts.slice(1, 3) };
         }
 
         function findEmployeeByName(nameText) {
@@ -220,41 +247,31 @@
             if (!text) return null;
 
             const candidates = appData.employees.map(normalizeEmployee);
-            const textLower = text.toLowerCase();
+            const parsed = parseNameParts(text);
+            if (!parsed || !parsed.lastName) return null;
 
-            for (const emp of candidates) {
-                const formatted = formatEmployeeName(emp).toLowerCase();
-                if (formatted && formatted === textLower) return emp;
-            }
+            const lastMatches = candidates.filter(emp =>
+                emp.lastName && emp.lastName.toLowerCase() === parsed.lastName.toLowerCase()
+            );
 
-            let lastName = '';
-            let firstName = '';
-            if (text.includes(',')) {
-                const parts = text.split(',');
-                lastName = parts[0].trim();
-                firstName = parts.slice(1).join(',').trim();
-            } else {
-                const parts = text.split(/\s+/).filter(Boolean);
-                if (parts.length >= 2) {
-                    lastName = parts[0];
-                    firstName = parts.slice(1).join(' ');
-                } else if (parts.length === 1) {
-                    lastName = parts[0];
-                }
-            }
+            if (lastMatches.length === 0) return null;
+            if (lastMatches.length === 1 && parsed.tokens.length === 0) return lastMatches[0];
 
-            const matches = candidates.filter(emp => {
-                if (!emp.lastName) return false;
-                const lastOk = emp.lastName.toLowerCase() === lastName.toLowerCase();
-                if (!lastOk) return false;
-                if (!firstName) return true;
-                if (!emp.firstName) return false;
-                return emp.firstName.toLowerCase() === firstName.toLowerCase()
-                    || firstNamesMatch(firstName, emp.firstName);
-            });
+            const scored = lastMatches.map(emp => {
+                const hitTokens = parsed.tokens.filter(token => tokenMatchesFirstName(token, emp.firstName));
+                return { emp, hitTokens };
+            }).filter(entry => entry.hitTokens.length > 0);
 
-            if (matches.length === 1) return matches[0];
-            if (!firstName && matches.length === 1) return matches[0];
+            if (scored.length === 0) return null;
+
+            const exact = scored.filter(entry =>
+                entry.hitTokens.some(token =>
+                    token.toLowerCase() === entry.emp.firstName.toLowerCase().split(/\s+/)[0]
+                )
+            );
+            if (exact.length === 1) return exact[0].emp;
+
+            if (scored.length === 1) return scored[0].emp;
             return null;
         }
 
@@ -463,7 +480,7 @@
 
                 card.innerHTML = `
                     <div class="card-header">
-                        <input class="section-title-input" value="${sec.label}" placeholder="Section Title" oninput="updateField('${sidStr}', 'label', this.value)">
+                        <input id="section-title-${sidStr}" class="section-title-input" value="${sec.label}" placeholder="Section Title" oninput="updateField('${sidStr}', 'label', this.value)">
                         <button class="card-remove" onclick="deleteSection('${sidStr}')" title="Delete Section">✕</button>
                     </div>
                     <textarea class="section-notes-textarea" placeholder="Notes..." oninput="updateField('${sidStr}', 'content', this.value)" rows="1">${sec.content || ''}</textarea>
@@ -478,11 +495,21 @@
                 container.appendChild(card);
             });
             renderStaffListModal();
+
+            if (focusSectionId) {
+                const titleInput = document.getElementById(`section-title-${focusSectionId}`);
+                if (titleInput) {
+                    titleInput.focus();
+                }
+                focusSectionId = null;
+            }
         }
 
         // --- CRUD OPERATIONS ---
         function addSection() {
-            appData.sections.push({ id: Date.now(), label: "", content: "", assignedInitials: [], dueDates: {} });
+            const id = Date.now();
+            appData.sections.push({ id, label: "", content: "", assignedInitials: [], dueDates: {} });
+            focusSectionId = id;
             queueSave(); render();
         }
 
@@ -553,11 +580,9 @@
             tempDueDates[ini] = val;
         }
 
-        function quickToggleStaff() {
-            const input = document.getElementById('quickAssignInput');
-            const rawVal = input.value.trim();
-            
-            if (!rawVal) { input.focus(); return; }
+        function applyAssignInput(rawVal, { clearInput = false } = {}) {
+            const messages = [];
+            if (!rawVal) return { applied: false, messages };
 
             const { matched, notFound } = parseAssignPasteText(rawVal);
             if (matched.length > 0) {
@@ -566,23 +591,21 @@
                     tempDueDates[initials] = dueDate;
                 });
                 tempSelected.sort();
-                renderSelectionGrid();
-                input.value = '';
                 if (notFound.length) {
-                    alert(`Added ${matched.length} staff.\n\nNot in directory: ${[...new Set(notFound)].join(', ')}`);
+                    messages.push(`Not in directory: ${[...new Set(notFound)].join(', ')}`);
                 }
-                input.focus();
-                return;
+                if (clearInput) document.getElementById('quickAssignInput').value = '';
+                renderSelectionGrid();
+                return { applied: true, messages };
             }
 
             if (notFound.length > 0) {
-                alert(`Not in directory: ${[...new Set(notFound)].join(', ')}`);
-                input.focus();
-                return;
+                messages.push(`Not in directory: ${[...new Set(notFound)].join(', ')}`);
+                return { applied: false, messages };
             }
 
             let inisArray = [];
-            
+
             if (rawVal.includes('(') && rawVal.includes(')')) {
                 const regex = /\(([a-zA-Z]+)\)/g;
                 let match;
@@ -590,19 +613,18 @@
                     inisArray.push(match[1].toUpperCase());
                 }
                 if (inisArray.length === 0) {
-                    alert("Could not find valid initials inside parentheses in the pasted text.");
-                    input.focus(); return;
+                    messages.push("Could not find valid initials inside parentheses in the pasted text.");
+                    return { applied: false, messages };
                 }
             } else {
                 inisArray = rawVal.toUpperCase().split(/\s+/).filter(t => /^[A-Z]{2,3}$/.test(t));
                 if (inisArray.length === 0) {
                     if (rawVal.includes('\n')) {
-                        alert("Could not parse paste.\n\nFor names + dates use:\nLast, First Middle\n03/15/2026\n\nOr use initials, TEAM data, or (ABC) format.");
+                        messages.push("Could not parse paste.\n\nFor names + dates use:\nLast, First Middle\n03/15/2026\n\nOr use initials, TEAM data, or (ABC) format.");
                     } else {
-                        alert("No valid initials found. Use 2–3 letter codes like AB CD.");
+                        messages.push("No valid initials found. Use 2–3 letter codes like AB CD.");
                     }
-                    input.focus();
-                    return;
+                    return { applied: false, messages };
                 }
             }
 
@@ -622,15 +644,30 @@
             });
 
             if (added === 0 && missing.length === 0) {
-                alert("Those initials are already assigned in this section.");
+                messages.push("Those initials are already assigned in this section.");
             } else if (added === 0 && missing.length > 0) {
-                alert("Not in directory: " + missing.join(', '));
+                messages.push("Not in directory: " + missing.join(', '));
             } else if (missing.length > 0) {
-                alert(`Added ${added} staff.\n\nNot in directory: ${missing.join(', ')}`);
+                messages.push(`Added ${added} staff.\n\nNot in directory: ${missing.join(', ')}`);
             }
-            
-            renderSelectionGrid();
-            input.value = '';
+
+            if (added > 0 || (added === 0 && missing.length === 0)) {
+                if (clearInput) document.getElementById('quickAssignInput').value = '';
+                renderSelectionGrid();
+                return { applied: added > 0, messages };
+            }
+
+            return { applied: false, messages };
+        }
+
+        function quickToggleStaff() {
+            const input = document.getElementById('quickAssignInput');
+            const rawVal = input.value.trim();
+
+            if (!rawVal) { input.focus(); return; }
+
+            const { messages } = applyAssignInput(rawVal, { clearInput: true });
+            if (messages.length) alert(messages.join('\n\n'));
             input.focus();
         }
 
@@ -643,6 +680,13 @@
         function finalizeAssignment() {
             const sec = appData.sections.find(s => s.id == currentTargetSection);
             if (!sec) return;
+
+            const input = document.getElementById('quickAssignInput');
+            const rawVal = input ? input.value.trim() : '';
+            if (rawVal) {
+                const { messages } = applyAssignInput(rawVal, { clearInput: true });
+                if (messages.length) alert(messages.join('\n\n'));
+            }
             
             const validSelected = tempSelected.filter(ini => hasEmployee(ini));
             const finalDueDates = {};
