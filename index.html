@@ -303,16 +303,66 @@
             return false;
         }
 
-        function firstNamesMatch(pastedFirst, empFirst) {
-            if (!pastedFirst || !empFirst) return false;
-            const pastedLead = normalizeNameToken(stripTrailingSuffixes(pastedFirst.split(/\s+/).filter(Boolean))[0]);
-            const empLead = normalizeNameToken(stripTrailingSuffixes(empFirst.split(/\s+/).filter(Boolean))[0]);
-            if (pastedLead.length > 1 && pastedLead === empLead) return true;
-            return namesCompatibleByPrefix(pastedLead, empLead);
+        const NICKNAME_GROUPS = [
+            ['nick', 'nicholas', 'nic', 'nicky', 'nickolas'],
+            ['chris', 'christopher', 'kristopher'],
+            ['bob', 'bobby', 'robert', 'rob', 'robby'],
+            ['bill', 'billy', 'william', 'will', 'willy'],
+            ['mike', 'michael', 'mikey'],
+            ['matt', 'matthew'],
+            ['dan', 'daniel', 'danny'],
+            ['dave', 'david', 'davey'],
+            ['steve', 'steven', 'stephen'],
+            ['tom', 'thomas', 'tommy'],
+            ['jim', 'james', 'jimmy', 'jamie'],
+            ['joe', 'joseph', 'joey'],
+            ['ed', 'eddie', 'edward'],
+            ['alex', 'alexander'],
+            ['ben', 'benjamin', 'benny'],
+            ['sam', 'samuel'],
+            ['pat', 'patrick'],
+            ['rick', 'richard', 'dick', 'rich', 'ricky'],
+            ['tony', 'anthony'],
+            ['andy', 'andrew', 'drew'],
+            ['josh', 'joshua'],
+            ['zach', 'zachary', 'zack'],
+            ['kate', 'katherine', 'catherine', 'kathy', 'katie'],
+            ['liz', 'elizabeth', 'beth', 'betty'],
+            ['jen', 'jennifer', 'jenny'],
+            ['sue', 'susan', 'susie'],
+            ['deb', 'deborah', 'debbie']
+        ];
+
+        function namesShareNicknameGroup(a, b) {
+            const left = normalizeNameToken(a);
+            const right = normalizeNameToken(b);
+            if (!left || !right) return false;
+            return NICKNAME_GROUPS.some(group => group.includes(left) && group.includes(right));
+        }
+
+        function firstNamesCompatible(a, b) {
+            if (!a || !b) return false;
+            const left = normalizeNameToken(a);
+            const right = normalizeNameToken(b);
+            if (left.length > 1 && left === right) return true;
+            if (namesShareNicknameGroup(left, right)) return true;
+            return namesCompatibleByPrefix(left, right);
         }
 
         function isLikelyMiddleInitial(token) {
             return /^[A-Za-z]\.?$/.test((token || '').trim());
+        }
+
+        function firstNamesMatch(pastedFirst, empFirst) {
+            if (!pastedFirst || !empFirst) return false;
+            const pastedWords = stripTrailingSuffixes(pastedFirst.split(/\s+/).filter(Boolean));
+            const empWords = stripTrailingSuffixes(empFirst.split(/\s+/).filter(Boolean));
+            const pastedCandidates = pastedWords.filter(word => !isLikelyMiddleInitial(word));
+            const empCandidates = empWords.filter(word => !isLikelyMiddleInitial(word));
+            if (!pastedCandidates.length || !empCandidates.length) return false;
+            return pastedCandidates.some(pastedWord =>
+                empCandidates.some(empWord => firstNamesCompatible(pastedWord, empWord))
+            );
         }
 
         function tokenMatchesFirstName(token, empFirst) {
@@ -361,11 +411,11 @@
             if (scored.length === 0) return null;
 
             const exact = scored.filter(entry =>
-                entry.hitTokens.some(token => {
-                    const tokenKey = normalizeNameToken(token);
-                    const empLead = normalizeNameToken(stripTrailingSuffixes(entry.emp.firstName.split(/\s+/).filter(Boolean))[0]);
-                    return tokenKey === empLead || namesCompatibleByPrefix(tokenKey, empLead);
-                })
+                entry.hitTokens.some(token =>
+                    entry.emp.firstName.split(/\s+/).filter(Boolean).some(word =>
+                        !isLikelyMiddleInitial(word) && firstNamesCompatible(token, word)
+                    )
+                )
             );
             if (exact.length === 1) return exact[0].emp;
 
