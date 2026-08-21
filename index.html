@@ -31,6 +31,26 @@
 
         .nav-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
+        .area-select-wrap {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.8rem;
+            color: #475569;
+            font-weight: 600;
+        }
+
+        .area-select-wrap select {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            color: #1e293b;
+            padding: 6px 8px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            outline: none;
+        }
+
         /* --- CARDS --- */
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; padding: 12px 16px; align-items: start; }
         .card { background: white; padding: 10px 12px; border-radius: 8px; border-top: 4px solid #3b82f6; box-shadow: 0 2px 6px rgba(0,0,0,0.06); position: relative; display: flex; flex-direction: column; gap: 6px; }
@@ -75,6 +95,7 @@
         #modalEmpList { grid-template-columns: 1fr; max-height: 40vh; }
 
     </style>
+    <script src="area-shift-legends.js"></script>
 </head>
 <body>
 
@@ -84,6 +105,19 @@
                 <button class="vibe-btn btn-primary" onclick="addSection()">+ New Section</button>
                 <button class="vibe-btn" onclick="toggleModal('empModal', true)">Manage Directory</button>
                 <button class="vibe-btn" style="background: #dcfce7; color: #166534; border-color: #bbf7d0;" onclick="importLearningReport()">Import eLMS Data</button>
+                <label class="area-select-wrap" for="areaSelect">
+                    Area
+                    <select id="areaSelect" onchange="setActiveArea(this.value)">
+                        <option value="1">Area 1</option>
+                        <option value="2">Area 2</option>
+                        <option value="3">Area 3</option>
+                        <option value="4">Area 4</option>
+                        <option value="5">Area 5</option>
+                        <option value="6">Area 6</option>
+                        <option value="7">Area 7</option>
+                        <option value="8" selected>Area 8</option>
+                    </select>
+                </label>
                 <button class="vibe-btn" style="background: #e0f2fe; color: #1e40af; border-color: #bae6fd;" onclick="autoCompareSchedule()">🖨️ Paste & Print Roster</button>
             </div>
             <div class="nav-right">
@@ -131,6 +165,8 @@
 
     <script>
         const STORAGE_KEY = 'dutyDashboardData';
+        const AREA_STORAGE_KEY = 'shiftAnalyzerArea';
+        let activeArea = localStorage.getItem(AREA_STORAGE_KEY) || '8';
 
         // --- APP DATA STATE ---
         let appData = {
@@ -1041,6 +1077,132 @@
         }
 
         // --- AUTO COMPARE & PRINT ROSTER ---
+        function getActiveShiftLegend() {
+            if (typeof AREA_SHIFT_LEGENDS === 'undefined') return {};
+            return AREA_SHIFT_LEGENDS[activeArea] || AREA_SHIFT_LEGENDS['8'] || {};
+        }
+
+        function setActiveArea(areaKey) {
+            activeArea = String(areaKey || '8');
+            localStorage.setItem(AREA_STORAGE_KEY, activeArea);
+            const sel = document.getElementById('areaSelect');
+            if (sel && sel.value !== activeArea) sel.value = activeArea;
+        }
+
+        function initAreaSelect() {
+            const sel = document.getElementById('areaSelect');
+            if (!sel) return;
+            if (AREA_SHIFT_LEGENDS && AREA_SHIFT_LEGENDS[activeArea]) {
+                sel.value = activeArea;
+            } else {
+                activeArea = '8';
+                sel.value = '8';
+            }
+        }
+
+        function stripShiftModifiers(code) {
+            return String(code || '').replace(/\$/g, '').replace(/FORCED$/i, 'F').trim();
+        }
+
+        function unwrapShiftBase(code) {
+            const text = String(code || '').trim();
+            const wrapped = text.match(/^A<(.+)>$/i);
+            return wrapped ? wrapped[1] : text;
+        }
+
+        function shiftLegendCandidates(code) {
+            const candidates = [];
+            const add = (value) => {
+                const next = String(value || '').trim();
+                if (next && !candidates.includes(next)) candidates.push(next);
+            };
+            const raw = String(code || '').trim();
+            add(raw);
+            add(stripShiftModifiers(raw));
+            add(unwrapShiftBase(raw));
+            add(stripShiftModifiers(unwrapShiftBase(raw)));
+            return candidates;
+        }
+
+        function lookupAreaShift(code) {
+            const legend = getActiveShiftLegend();
+            for (const candidate of shiftLegendCandidates(code)) {
+                const key = stripShiftModifiers(candidate).toUpperCase();
+                if (legend[key]) return legend[key];
+            }
+            return null;
+        }
+
+        function clockToMinutes(value) {
+            const parts = String(value || '').split(':');
+            if (parts.length < 2) return null;
+            const hours = parseInt(parts[0], 10);
+            const mins = parseInt(parts[1], 10);
+            if (Number.isNaN(hours) || Number.isNaN(mins)) return null;
+            return hours * 100 + mins;
+        }
+
+        function getShiftStartMinutes(code) {
+            const entry = lookupAreaShift(code);
+            if (entry && entry.s) return clockToMinutes(entry.s);
+
+            const match = String(code || '').trim().match(/^(\d{3,4})/);
+            if (match) return parseInt(match[1], 10);
+            return null;
+        }
+
+        function classifyShiftBand(code) {
+            const startMinutes = getShiftStartMinutes(code);
+            if (startMinutes == null) return null;
+            return startMinutes <= 1000 ? 'Day' : 'Eve';
+        }
+
+        function isShiftBandLine(line) {
+            const text = String(line || '').trim();
+            if (!text) return false;
+            if (/^(MID|DAY|SWING|MID-DAY)$/i.test(text)) return false;
+            if (/^\d+\s+of\s+\d+/i.test(text)) return false;
+            if (lookupAreaShift(text)) return true;
+            if (/^A<.+>$/i.test(text)) return true;
+            if (/^\d{3,4}(-\d+)?[A-Z$]*$/i.test(text)) return true;
+            if (/^\d{1,2}(-\d+)?[A-Z$]*$/i.test(text) && lookupAreaShift(text)) return true;
+            return false;
+        }
+
+        function extractInitialsFromScheduleLine(line) {
+            const cleaned = String(line || '').toUpperCase().replace(/[<>]/g, ' ');
+            return cleaned.split(/[^A-Z]+/).filter(token => token.length === 2 && hasEmployee(token));
+        }
+
+        function buildShiftMapFromSchedule(rawData) {
+            const shiftMap = {};
+            let scheduleData = rawData.toUpperCase();
+            const reqStart = scheduleData.indexOf('===REQUESTS_START===');
+            if (reqStart !== -1) scheduleData = scheduleData.substring(0, reqStart);
+            const schedStart = scheduleData.indexOf('===SCHEDULE_START===');
+            if (schedStart !== -1) scheduleData = scheduleData.substring(schedStart + 20);
+
+            let currentShiftType = null;
+
+            for (const rawLine of scheduleData.split('\n')) {
+                const line = rawLine.trim();
+                if (!line) continue;
+
+                if (isShiftBandLine(line)) {
+                    currentShiftType = classifyShiftBand(line);
+                    continue;
+                }
+
+                if (!currentShiftType) continue;
+
+                for (const ini of extractInitialsFromScheduleLine(line)) {
+                    shiftMap[ini] = currentShiftType;
+                }
+            }
+
+            return shiftMap;
+        }
+
         async function autoCompareSchedule() {
             try {
                 const rawData = await navigator.clipboard.readText();
@@ -1061,30 +1223,13 @@
                 if (rawDateText) reportDate = rawDateText; 
             }
 
-            let scheduleData = rawData.toUpperCase();
-            const reqStart = scheduleData.indexOf('===REQUESTS_START===');
-            if (reqStart !== -1) scheduleData = scheduleData.substring(0, reqStart);
-            const schedStartUpper = scheduleData.indexOf('===SCHEDULE_START===');
-            if (schedStartUpper !== -1) scheduleData = scheduleData.substring(schedStartUpper + 20);
-
-            let shiftMap = {}; 
-            let currentShiftTime = -1; 
-            const lines = scheduleData.split('\n');
-
-            for (let line of lines) {
-                line = line.trim();
-                if (!line) continue;
-                const timeMatch = line.match(/^(\d{4})/);
-                if (timeMatch) { currentShiftTime = parseInt(timeMatch[1], 10); continue; }
-                if (currentShiftTime >= 0 && currentShiftTime < 2000) {
-                    let shiftType = (currentShiftTime <= 1000) ? 'Day' : 'Eve';
-                    const words = line.split(/[^A-Z]+/);
-                    for (let w of words) { if (w && hasEmployee(w)) shiftMap[w] = shiftType; }
-                }
-            }
+            let shiftMap = buildShiftMapFromSchedule(rawData);
 
             const pastedInitials = Object.keys(shiftMap);
-            if (pastedInitials.length === 0) { alert("Could not find initials for shifts before 2000 matching the Directory."); return; }
+            if (pastedInitials.length === 0) {
+                alert(`Could not find initials on the schedule for Area ${activeArea}. Check the area selection and pasted schedule.`);
+                return;
+            }
 
             let printHTML = `
             <!DOCTYPE html>
@@ -1107,7 +1252,7 @@
             <body>
                 <div class="header-container">
                     <h1>Duty/Pre-Duty Items</h1>
-                    <div class="date-stamp">${reportDate}</div>
+                    <div class="date-stamp">${reportDate}<div style="font-size:0.85rem;font-weight:normal;margin-top:4px;">Area ${activeArea}</div></div>
                 </div>`;
 
             let matchCount = 0;
@@ -1209,6 +1354,7 @@
 
         // --- START ---
         initElmsBookmarklet();
+        initAreaSelect();
         startApp();
 
     </script>
