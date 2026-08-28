@@ -94,6 +94,21 @@
         .dir-entry-name { color: #475569; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         #modalEmpList { grid-template-columns: 1fr; max-height: 40vh; }
 
+        .roster-date-hint { margin: 0 0 14px 0; color: #64748b; font-size: 0.82rem; line-height: 1.45; }
+        .roster-date-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
+        .roster-date-row label { font-size: 0.82rem; font-weight: 700; color: #475569; }
+        .roster-date-row select {
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #1e293b;
+            background: #f8fafc;
+            outline: none;
+        }
+        #rosterPrintBtn:disabled { opacity: 0.45; cursor: not-allowed; }
+
     </style>
     <script src="area-shift-legends.js"></script>
 </head>
@@ -125,6 +140,21 @@
             </div>
         </div>
         <div id="container" class="grid"></div>
+    </div>
+
+    <div id="rosterDateModal" class="modal-overlay" onclick="toggleModal('rosterDateModal', false)">
+        <div class="modal-content" style="min-width:min(420px,90vw);" onclick="event.stopPropagation()">
+            <h3 style="margin:0 0 8px 0;">Print Roster Date</h3>
+            <p class="roster-date-hint">Choose the duty date to print. Day and Eve come from that date’s schedule. Mid shifts (start 2030–0000) are taken from the <strong>next</strong> day’s schedule.</p>
+            <div class="roster-date-row">
+                <label for="rosterDateSelect">Date</label>
+                <select id="rosterDateSelect" onchange="updateRosterPrintButton()"></select>
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end;">
+                <button type="button" class="vibe-btn" onclick="toggleModal('rosterDateModal', false)">Cancel</button>
+                <button type="button" id="rosterPrintBtn" class="vibe-btn btn-primary" onclick="confirmRosterPrint()">Print Roster</button>
+            </div>
+        </div>
     </div>
 
     <div id="empModal" class="modal-overlay" onclick="toggleModal('empModal', false)">
@@ -1154,7 +1184,9 @@
         function classifyShiftBand(code) {
             const startMinutes = getShiftStartMinutes(code);
             if (startMinutes == null) return null;
-            return startMinutes <= 1000 ? 'Day' : 'Eve';
+            if (startMinutes <= 1000) return 'Day';
+            if (startMinutes >= 2030 || startMinutes === 0) return 'Mid';
+            return 'Eve';
         }
 
         function isShiftBandLine(line) {
@@ -1174,11 +1206,54 @@
             return cleaned.split(/[^A-Z]+/).filter(token => token.length === 2 && hasEmployee(token));
         }
 
-        function buildShiftMapFromSchedule(rawData) {
+        function parseScheduleDateKey(label) {
+            const text = String(label || '').trim();
+            const slash = text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+            if (slash) {
+                return `${slash[3]}-${slash[1].padStart(2, '0')}-${slash[2].padStart(2, '0')}`;
+            }
+            const named = Date.parse(text.replace(/^\s*(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday),?\s*/i, ''));
+            if (!Number.isNaN(named)) {
+                const d = new Date(named);
+                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            }
+            return null;
+        }
+
+        function formatDateKeyFromDate(d) {
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+
+        function addDaysToDateKey(dateKey, days) {
+            const d = new Date(String(dateKey) + 'T12:00:00');
+            if (Number.isNaN(d.getTime())) return null;
+            d.setDate(d.getDate() + days);
+            return formatDateKeyFromDate(d);
+        }
+
+        function parseScheduleDays(rawData) {
+            const normalized = String(rawData || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            const chunks = normalized.split('===DATE===').map(part => part.trim()).filter(Boolean);
+            const days = [];
+
+            for (const chunk of chunks) {
+                const schedIdx = chunk.indexOf('===SCHEDULE_START===');
+                if (schedIdx === -1) continue;
+                const dateLabel = chunk.substring(0, schedIdx).trim();
+                let rest = chunk.substring(schedIdx);
+                const reqIdx = rest.indexOf('===REQUESTS_START===');
+                if (reqIdx !== -1) rest = rest.substring(0, reqIdx);
+                const dateKey = parseScheduleDateKey(dateLabel);
+                days.push({ dateLabel, dateKey, scheduleSection: rest });
+            }
+
+            return days;
+        }
+
+        function buildShiftMapFromScheduleSection(scheduleSection, allowedTypes) {
+            const allowed = new Set(allowedTypes || ['Day', 'Eve', 'Mid']);
             const shiftMap = {};
-            let scheduleData = rawData.toUpperCase();
-            const reqStart = scheduleData.indexOf('===REQUESTS_START===');
-            if (reqStart !== -1) scheduleData = scheduleData.substring(0, reqStart);
+            let scheduleData = String(scheduleSection || '').toUpperCase();
             const schedStart = scheduleData.indexOf('===SCHEDULE_START===');
             if (schedStart !== -1) scheduleData = scheduleData.substring(schedStart + 20);
 
@@ -1189,7 +1264,8 @@
                 if (!line) continue;
 
                 if (isShiftBandLine(line)) {
-                    currentShiftType = classifyShiftBand(line);
+                    const bandType = classifyShiftBand(line);
+                    currentShiftType = bandType && allowed.has(bandType) ? bandType : null;
                     continue;
                 }
 
@@ -1203,33 +1279,145 @@
             return shiftMap;
         }
 
+        function buildRosterShiftMap(days, selectedDateKey) {
+            const shiftMap = {};
+            const dayBlock = days.find(d => d.dateKey === selectedDateKey);
+            const nextDateKey = addDaysToDateKey(selectedDateKey, 1);
+            const nextBlock = days.find(d => d.dateKey === nextDateKey);
+
+            if (dayBlock) {
+                Object.assign(shiftMap, buildShiftMapFromScheduleSection(dayBlock.scheduleSection, ['Day', 'Eve']));
+            }
+            if (nextBlock) {
+                Object.assign(shiftMap, buildShiftMapFromScheduleSection(nextBlock.scheduleSection, ['Mid']));
+            }
+
+            return shiftMap;
+        }
+
+        function buildShiftMapFromSchedule(rawData) {
+            const days = parseScheduleDays(rawData);
+            if (days.length === 1 && days[0].dateKey) {
+                return buildRosterShiftMap(days, days[0].dateKey);
+            }
+            if (days.length === 1) {
+                return buildShiftMapFromScheduleSection(days[0].scheduleSection, ['Day', 'Eve', 'Mid']);
+            }
+            return {};
+        }
+
+        let pendingRosterRawData = '';
+        let pendingRosterDays = [];
+
+        function updateRosterPrintButton() {
+            const sel = document.getElementById('rosterDateSelect');
+            const btn = document.getElementById('rosterPrintBtn');
+            if (!btn) return;
+            btn.disabled = !(sel && sel.value);
+        }
+
+        function showRosterDateModal(rawData, days) {
+            pendingRosterRawData = rawData;
+            pendingRosterDays = days;
+
+            const sel = document.getElementById('rosterDateSelect');
+            if (!sel) return;
+
+            const selectable = days.filter(d => d.dateKey);
+            sel.innerHTML = '';
+
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = 'Select a date…';
+            placeholder.disabled = true;
+            placeholder.selected = true;
+            sel.appendChild(placeholder);
+
+            selectable.forEach(day => {
+                const opt = document.createElement('option');
+                opt.value = day.dateKey;
+                opt.textContent = day.dateLabel || day.dateKey;
+                sel.appendChild(opt);
+            });
+
+            const todayKey = formatDateKeyFromDate(new Date());
+            if (selectable.some(d => d.dateKey === todayKey)) {
+                sel.value = todayKey;
+            }
+
+            updateRosterPrintButton();
+            toggleModal('rosterDateModal', true);
+            setTimeout(() => sel.focus(), 80);
+        }
+
+        function confirmRosterPrint() {
+            const sel = document.getElementById('rosterDateSelect');
+            const dateKey = sel ? String(sel.value || '').trim() : '';
+            if (!dateKey) {
+                alert('Select a date from the pay period before printing.');
+                return;
+            }
+            const dayInfo = pendingRosterDays.find(d => d.dateKey === dateKey);
+            if (!dayInfo) {
+                alert('Choose a valid date from the pasted pay period.');
+                return;
+            }
+            toggleModal('rosterDateModal', false);
+            generatePrintableRoster(pendingRosterRawData, dateKey, pendingRosterDays);
+        }
+
         async function autoCompareSchedule() {
             try {
                 const rawData = await navigator.clipboard.readText();
                 if (!rawData || !rawData.trim()) { alert("Clipboard is empty. Copy the schedule data first."); return; }
-                generatePrintableRoster(rawData);
+
+                const days = parseScheduleDays(rawData);
+                if (!days.length) {
+                    alert('Could not find schedule days. Use the Copy Pay Period bookmark on WMT Worksheet View.');
+                    return;
+                }
+
+                const dated = days.filter(d => d.dateKey);
+                if (dated.length === 0) {
+                    alert('Could not parse dates from the clipboard. Check the copied pay period data.');
+                    return;
+                }
+
+                showRosterDateModal(rawData, days);
             } catch (err) {
                 alert("Clipboard access denied. Allow permissions in your browser.");
             }
         }
 
-        function generatePrintableRoster(rawData) {
-            let reportDate = new Date().toLocaleDateString();
-            const dateIdx = rawData.indexOf('===DATE===');
-            const schedIdx = rawData.indexOf('===SCHEDULE_START===');
-            
-            if (dateIdx !== -1 && schedIdx !== -1 && schedIdx > dateIdx) {
-                let rawDateText = rawData.substring(dateIdx + 10, schedIdx).trim();
-                if (rawDateText) reportDate = rawDateText; 
+        function generatePrintableRoster(rawData, selectedDateKey, parsedDays) {
+            const days = parsedDays || parseScheduleDays(rawData);
+            const dayInfo = days.find(d => d.dateKey === selectedDateKey);
+            let reportDate = dayInfo?.dateLabel || new Date().toLocaleDateString();
+
+            if (!selectedDateKey) {
+                const dateIdx = rawData.indexOf('===DATE===');
+                const schedIdx = rawData.indexOf('===SCHEDULE_START===');
+                if (dateIdx !== -1 && schedIdx !== -1 && schedIdx > dateIdx) {
+                    const rawDateText = rawData.substring(dateIdx + 10, schedIdx).trim();
+                    if (rawDateText) reportDate = rawDateText;
+                }
             }
 
-            let shiftMap = buildShiftMapFromSchedule(rawData);
+            let shiftMap = selectedDateKey
+                ? buildRosterShiftMap(days, selectedDateKey)
+                : buildShiftMapFromSchedule(rawData);
 
             const pastedInitials = Object.keys(shiftMap);
             if (pastedInitials.length === 0) {
                 alert(`Could not find initials on the schedule for Area ${activeArea}. Check the area selection and pasted schedule.`);
                 return;
             }
+
+            const nextDateKey = selectedDateKey ? addDaysToDateKey(selectedDateKey, 1) : null;
+            const nextDayInfo = nextDateKey ? days.find(d => d.dateKey === nextDateKey) : null;
+            const midNote = nextDayInfo
+                ? `<div style="font-size:0.8rem;font-weight:normal;margin-top:2px;">Mid from ${nextDayInfo.dateLabel}</div>`
+                : (selectedDateKey ? `<div style="font-size:0.8rem;font-weight:normal;margin-top:2px;">No next-day schedule for Mid</div>` : '');
 
             let printHTML = `
             <!DOCTYPE html>
@@ -1252,12 +1440,12 @@
             <body>
                 <div class="header-container">
                     <h1>Duty/Pre-Duty Items</h1>
-                    <div class="date-stamp">${reportDate}<div style="font-size:0.85rem;font-weight:normal;margin-top:4px;">Area ${activeArea}</div></div>
+                    <div class="date-stamp">${reportDate}<div style="font-size:0.85rem;font-weight:normal;margin-top:4px;">Area ${activeArea}</div>${midNote}</div>
                 </div>`;
 
             let matchCount = 0;
             appData.sections.forEach(sec => {
-                const matchedDay = []; const matchedEve = [];
+                const matchedDay = []; const matchedEve = []; const matchedMid = [];
                 const sharedDue = getSharedDueDate(sec);
                 
                 sec.assignedInitials.forEach(ini => {
@@ -1268,10 +1456,11 @@
 
                     if (shiftMap[ini] === 'Day') matchedDay.push(printIni);
                     else if (shiftMap[ini] === 'Eve') matchedEve.push(printIni);
+                    else if (shiftMap[ini] === 'Mid') matchedMid.push(printIni);
                 });
                 
-                if (matchedDay.length > 0 || matchedEve.length > 0) {
-                    matchCount += (matchedDay.length + matchedEve.length);
+                if (matchedDay.length > 0 || matchedEve.length > 0 || matchedMid.length > 0) {
+                    matchCount += (matchedDay.length + matchedEve.length + matchedMid.length);
                     printHTML += `<div class="section-block"><div class="section-title">${sec.label || 'Untitled Section'}</div>`;
                     
                     if (sec.content && sec.content.trim() !== '') {
@@ -1280,6 +1469,7 @@
 
                     if (matchedDay.length > 0) printHTML += `<div class="shift-label">Day: <span class="initials-list">${matchedDay.join(', ')}</span></div>`;
                     if (matchedEve.length > 0) printHTML += `<div class="shift-label">Eve: <span class="initials-list">${matchedEve.join(', ')}</span></div>`;
+                    if (matchedMid.length > 0) printHTML += `<div class="shift-label">Mid: <span class="initials-list">${matchedMid.join(', ')}</span></div>`;
                     printHTML += `</div>`;
                 }
             });
