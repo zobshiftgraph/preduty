@@ -713,6 +713,8 @@
                     else if (user.name) unmatched.push(user.name);
                 });
 
+                if (imported.assignedInitials.length === 0) return;
+
                 const existing = findSectionByImportTitle(label);
                 if (existing) {
                     existing.label = label;
