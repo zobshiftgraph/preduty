@@ -669,14 +669,6 @@
             return appData.sections.find(sec => sectionTitleKey(sec.label) === key) || null;
         }
 
-        function isElmsSection(sec) {
-            if (sec.source === 'elms') return true;
-            const hasContent = (sec.content || '').trim();
-            const hasAssignees = (sec.assignedInitials || []).length > 0;
-            const allHaveDueDates = hasAssignees && sec.assignedInitials.every(ini => sec.dueDates && sec.dueDates[ini]);
-            return !hasContent && allHaveDueDates;
-        }
-
         function buildSectionFromImportItem(item) {
             const sec = {
                 assignedInitials: [],
@@ -707,9 +699,9 @@
             }
 
             let assignmentCount = 0;
+            let updatedCount = 0;
             let addedCount = 0;
             const unmatched = [];
-            const newSections = [];
 
             items.forEach(item => {
                 const label = cleanLearningTitle(item.title) || 'Untitled Training';
@@ -723,22 +715,28 @@
 
                 if (imported.assignedInitials.length === 0) return;
 
-                const sec = {
-                    id: Date.now() + Math.floor(Math.random() * 100000),
-                    label,
-                    content: '',
-                    assignedInitials: imported.assignedInitials,
-                    dueDates: imported.dueDates,
-                    source: 'elms'
-                };
-                normalizeSectionDueDisplay(sec);
-                newSections.push(sec);
-                addedCount++;
+                const existing = findSectionByImportTitle(label);
+                if (existing) {
+                    existing.label = label;
+                    existing.assignedInitials = imported.assignedInitials;
+                    existing.dueDates = imported.dueDates;
+                    existing.source = 'elms';
+                    normalizeSectionDueDisplay(existing);
+                    updatedCount++;
+                } else {
+                    const sec = {
+                        id: Date.now() + Math.floor(Math.random() * 100000),
+                        label,
+                        content: '',
+                        assignedInitials: imported.assignedInitials,
+                        dueDates: imported.dueDates,
+                        source: 'elms'
+                    };
+                    normalizeSectionDueDisplay(sec);
+                    appData.sections.push(sec);
+                    addedCount++;
+                }
             });
-
-            const removedCount = appData.sections.filter(isElmsSection).length;
-            appData.sections = appData.sections.filter(sec => !isElmsSection(sec));
-            appData.sections.push(...newSections);
 
             if (appData.sections.length === 0) {
                 appData.sections.push({
@@ -754,7 +752,7 @@
             render();
 
             const uniqueUnmatched = [...new Set(unmatched)];
-            let message = `Removed ${removedCount} eLMS section(s), added ${addedCount} new section(s), ${assignmentCount} assignment(s).`;
+            let message = `Updated ${updatedCount} section(s), added ${addedCount} new section(s), ${assignmentCount} assignment(s).`;
             if (uniqueUnmatched.length) {
                 message += `\n\nNot in directory (${uniqueUnmatched.length}):\n${uniqueUnmatched.slice(0, 12).join('\n')}`;
                 if (uniqueUnmatched.length > 12) message += `\n...and ${uniqueUnmatched.length - 12} more`;
