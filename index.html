@@ -1276,6 +1276,8 @@
                 if (!currentShiftType) continue;
 
                 for (const ini of extractInitialsFromScheduleLine(line)) {
+                    const existing = shiftMap[ini];
+                    if (currentShiftType === 'Mid' && (existing === 'Day' || existing === 'Eve')) continue;
                     shiftMap[ini] = currentShiftType;
                 }
             }
@@ -1293,7 +1295,10 @@
                 Object.assign(shiftMap, buildShiftMapFromScheduleSection(dayBlock.scheduleSection, ['Day', 'Eve']));
             }
             if (nextBlock) {
-                Object.assign(shiftMap, buildShiftMapFromScheduleSection(nextBlock.scheduleSection, ['Mid']));
+                const midMap = buildShiftMapFromScheduleSection(nextBlock.scheduleSection, ['Mid']);
+                for (const ini of Object.keys(midMap)) {
+                    if (!shiftMap[ini]) shiftMap[ini] = 'Mid';
+                }
             }
 
             return shiftMap;
