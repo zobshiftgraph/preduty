@@ -72,6 +72,8 @@
         
         .stamp-complete { color: #22c55e; font-weight: 900; font-size: 0.9rem; letter-spacing: 1px; border: 2px solid #22c55e; padding: 4px 12px; border-radius: 6px; transform: rotate(-3deg); opacity: 0.85; user-select: none; margin: 0 auto; }
 
+        .elms-label { align-self: center; background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; border-radius: 999px; padding: 1px 8px; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.05em; }
+
         .card-assign-btn { width: 100%; justify-content: center; padding: 5px 8px; font-size: 0.72rem; background: #f8fafc; }
 
         /* --- MODALS --- */
@@ -188,6 +190,7 @@
             <div id="selectionGrid"></div>
             <div style="display: flex; gap: 12px; margin-top: 25px;">
                 <button class="vibe-btn" onclick="toggleModal('assignModal', false)" style="flex: 1; justify-content: center;">Cancel</button>
+                <button onclick="pasteAndSubmitAssignment()" class="vibe-btn" style="flex: 2; justify-content: center; background:#e0f2fe; color:#1e40af; border-color:#bae6fd;">Paste and Submit</button>
                 <button onclick="finalizeAssignment()" class="vibe-btn btn-primary" style="flex: 2; justify-content: center;">Save Assignments</button>
             </div>
         </div>
@@ -699,9 +702,12 @@
             }
 
             let assignmentCount = 0;
-            let updatedCount = 0;
             let addedCount = 0;
             const unmatched = [];
+
+            // Remove every section from previous eLMS imports before adding the new ones
+            const removedCount = appData.sections.filter(sec => sec.source === 'elms').length;
+            appData.sections = appData.sections.filter(sec => sec.source !== 'elms');
 
             items.forEach(item => {
                 const label = cleanLearningTitle(item.title) || 'Untitled Training';
@@ -715,27 +721,17 @@
 
                 if (imported.assignedInitials.length === 0) return;
 
-                const existing = findSectionByImportTitle(label);
-                if (existing) {
-                    existing.label = label;
-                    existing.assignedInitials = imported.assignedInitials;
-                    existing.dueDates = imported.dueDates;
-                    existing.source = 'elms';
-                    normalizeSectionDueDisplay(existing);
-                    updatedCount++;
-                } else {
-                    const sec = {
-                        id: Date.now() + Math.floor(Math.random() * 100000),
-                        label,
-                        content: '',
-                        assignedInitials: imported.assignedInitials,
-                        dueDates: imported.dueDates,
-                        source: 'elms'
-                    };
-                    normalizeSectionDueDisplay(sec);
-                    appData.sections.push(sec);
-                    addedCount++;
-                }
+                const sec = {
+                    id: Date.now() + Math.floor(Math.random() * 100000),
+                    label,
+                    content: '',
+                    assignedInitials: imported.assignedInitials,
+                    dueDates: imported.dueDates,
+                    source: 'elms'
+                };
+                normalizeSectionDueDisplay(sec);
+                appData.sections.push(sec);
+                addedCount++;
             });
 
             if (appData.sections.length === 0) {
@@ -752,7 +748,7 @@
             render();
 
             const uniqueUnmatched = [...new Set(unmatched)];
-            let message = `Updated ${updatedCount} section(s), added ${addedCount} new section(s), ${assignmentCount} assignment(s).`;
+            let message = `Removed ${removedCount} old eLMS section(s), added ${addedCount} new eLMS section(s), ${assignmentCount} assignment(s).`;
             if (uniqueUnmatched.length) {
                 message += `\n\nNot in directory (${uniqueUnmatched.length}):\n${uniqueUnmatched.slice(0, 12).join('\n')}`;
                 if (uniqueUnmatched.length > 12) message += `\n...and ${uniqueUnmatched.length - 12} more`;
@@ -802,6 +798,7 @@
                         <input id="section-title-${sidStr}" class="section-title-input" value="${sec.label}" placeholder="Section Title" oninput="updateField('${sidStr}', 'label', this.value)">
                         <button class="card-remove" onclick="deleteSection('${sidStr}')" title="Delete Section">✕</button>
                     </div>
+                    ${sec.source === 'elms' ? `<div class="elms-label">eLMS</div>` : ''}
                     <textarea class="section-notes-textarea" placeholder="Notes..." oninput="updateField('${sidStr}', 'content', this.value)" rows="1">${sec.content || ''}</textarea>
                     <div class="staff-area">
                         ${isComplete
@@ -1020,6 +1017,49 @@
             queueSave();
             render();
             toggleModal('assignModal', false);
+        }
+
+        // Clears everyone from the section, pastes the clipboard, then saves.
+        async function pasteAndSubmitAssignment() {
+            const sec = appData.sections.find(s => s.id == currentTargetSection);
+            if (!sec) return;
+
+            let text = '';
+            try {
+                text = await navigator.clipboard.readText();
+            } catch (err) {
+                text = prompt('Clipboard access denied. Paste the data here:') || '';
+            }
+            text = text.trim();
+            if (!text) {
+                alert('Clipboard is empty. Copy the assignment data first.');
+                return;
+            }
+
+            const prevSelected = [...tempSelected];
+            const prevDueDates = { ...tempDueDates };
+
+            // 1. Remove everyone assigned to this section
+            tempSelected = [];
+            tempDueDates = {};
+
+            // 2. Paste the clipboard data
+            const input = document.getElementById('quickAssignInput');
+            if (input) input.value = '';
+            const { applied, messages } = applyAssignInput(text);
+
+            if (!applied) {
+                // Nothing usable was pasted: keep the section as it was
+                tempSelected = prevSelected;
+                tempDueDates = prevDueDates;
+                renderSelectionGrid();
+                alert((messages.length ? messages.join('\n\n') + '\n\n' : '') + 'Nothing was saved; the section was left unchanged.');
+                return;
+            }
+            if (messages.length) alert(messages.join('\n\n'));
+
+            // 3. Save assignments
+            finalizeAssignment();
         }
 
         // --- DIRECTORY MANAGEMENT ---
